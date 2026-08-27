@@ -1,26 +1,25 @@
-import type { LessonWithData } from "../types/timetable";
+// ProTERA bell-schedule rules.
+//
+// Real class times are looked up directly per (period, length) instead of
+// going through a shared grid of "slots" — there is no positional index for
+// lessons/breaks to collide over here, only clock times.
 
-interface PlacementParams {
-	x: number;
-	y: number;
-	length: number;
+import type { DayItem } from "./timetableConstruction.ts";
+
+export interface LessonTimes {
 	startTime: string;
 	endTime: string;
-	title: string;
-	dayHasLongThird: boolean[];
-	dayHasShortThird: boolean[];
-	useProTERATimeRules: boolean;
-	isThirdLessonCandidate: boolean;
 }
 
-interface DaySlotItem {
-	key: string;
+export interface ProTERABreakDefinition {
 	title: string;
 	startTime: string;
 	endTime: string;
-	location: string;
-	name: string | false;
-	isBreak: boolean;
+}
+
+interface DayLessonTime {
+	startTime: string;
+	endTime: string;
 }
 
 export function isLiikumisopetusTitle(title: string): boolean {
@@ -31,175 +30,134 @@ export function isLiikumisopetusTitle(title: string): boolean {
 		.includes("liikumis");
 }
 
-export function scanThirdLessonPatterns(
-	allLessons: LessonWithData[],
-	periodToSlot: number[],
-	useProTERATimeRules: boolean
-): { dayHasLongThird: boolean[]; dayHasShortThird: boolean[] } {
-	const dayHasLongThird = new Array(5).fill(false);
-	const dayHasShortThird = new Array(5).fill(false);
+/**
+ * The real-world bell schedule, expressed directly as period + lesson
+ * length -> clock time. This replaces the old period -> grid-slot ->
+ * time-boundary-array indirection.
+ *
+ * Sourced from the "ProTERA päevakava" chart. Most periods only change
+ * under ProTERA rules for periods 3, 5, 6, 7, 8, 9 — outside those, the
+ * schedule is the same regardless of `useProTERATimeRules`.
+ *
+ * Lengths above 2 are treated the same as length 2 (the source schedule
+ * doesn't define anything beyond a double period).
+ */
+export function getLessonTimes(period: number, length: number, useProTERATimeRules: boolean, hasLongThirdLesson: boolean): LessonTimes {
+	const isDouble = length >= 2;
 
-	if (!useProTERATimeRules) {
-		return { dayHasLongThird, dayHasShortThird };
-	}
+	switch (period) {
+		case 0:
+		case 1:
+			return isDouble
+				? { startTime: "9:00", endTime: "10:20" }
+				: { startTime: "9:00", endTime: "9:35" };
 
-	for (const lessonData of allLessons) {
-		if (!lessonData?.lesson || !lessonData.time) {
-			continue;
-		}
+		case 2:
+			return isDouble
+				? { startTime: "9:35", endTime: "10:30" }
+				: { startTime: "9:35", endTime: "10:20" };
 
-		const dayIndex = lessonData.time.day - 1;
-		if (dayIndex < 0 || dayIndex > 4) {
-			continue;
-		}
-
-		const title = lessonData.lesson.subject?.name ?? "Tund";
-		const length = Math.max(1, parseInt(String(lessonData.time.length), 10) || 1);
-		const slot = lessonData.time.period === 2 && length === 1
-			? 1
-			: periodToSlot[lessonData.time.period];
-
-		if (slot !== 6 || isLiikumisopetusTitle(title)) {
-			continue;
-		}
-
-		if (length >= 2) {
-			dayHasLongThird[dayIndex] = true;
-		} else {
-			dayHasShortThird[dayIndex] = true;
-		}
-	}
-
-	return { dayHasLongThird, dayHasShortThird };
-}
-
-export function adjustLessonPlacementForProTERA(params: PlacementParams): PlacementParams & { isLiikumisopetus: boolean } {
-	let { x, y, length, startTime, endTime } = params;
-	const isLiikumisopetus = isLiikumisopetusTitle(params.title);
-
-	if (!params.useProTERATimeRules) {
-		return { ...params, x, y, length, startTime, endTime, isLiikumisopetus };
-	}
-
-	if (x === 6 && length === 2) {
-		startTime = "12:40";
-		endTime = "14:00";
-	}
-	if (x === 6 && length === 1) {
-		startTime = "12:40";
-		endTime = "13:25";
-	}
-	if (x === 8 && length === 1) {
-		if (params.dayHasLongThird[y]) {
-			x = 9;
-			startTime = "14:20";
-			endTime = "15:05";
-		} else {
-			startTime = "13:45";
-			endTime = "14:30";
-		}
-	}
-	if (x === 8 && length === 2 && !params.dayHasLongThird[y]) {
-		startTime = "13:45";
-		endTime = "15:05";
-	}
-	if (x === 9 && length === 1) {
-		startTime = "14:20";
-		endTime = "15:05";
-	}
-	if (x === 6 && isLiikumisopetus) {
-		x = 7;
-		length = Math.max(2, length + 1);
-		startTime = "13:15";
-		endTime = "14:25";
-	}
-	if (x === 7 && !params.isThirdLessonCandidate && params.dayHasShortThird[y]) {
-		x = 8;
-		if (length === 1) {
-			startTime = "13:45";
-			endTime = "14:30";
-		} else if (length === 2) {
-			startTime = "13:45";
-			endTime = "15:05";
-		}
-	}
-
-	return { ...params, x, y, length, startTime, endTime, isLiikumisopetus };
-}
-
-export function addProTERABreaks(
-	addToDay: (dayIndex: number, startSlot: number, width: number, itemData: DaySlotItem) => boolean,
-	thirdLessonByDay: Array<{ x: number; length: number; isLiikumisopetus?: boolean } | null>
-): void {
-	for (let i = 0; i < 5; i += 1) {
-		addToDay(i, 2, 1, {
-			key: `break-amps-${i}`,
-			title: "Amps",
-			startTime: "10:20",
-			endTime: "10:40",
-			location: "-",
-			name: false,
-			isBreak: true
-		});
-	}
-
-	addToDay(0, 5, 1, {
-		key: "special-tiimitund-0",
-		title: "Tiimitund",
-		startTime: "12:00",
-		endTime: "12:40",
-		location: "-",
-		name: false,
-		isBreak: false
-	});
-	addToDay(1, 5, 1, {
-		key: "special-lugemine-1",
-		title: "Lugemine",
-		startTime: "12:00",
-		endTime: "12:40",
-		location: "-",
-		name: false,
-		isBreak: false
-	});
-
-	for (let i = 2; i < 5; i += 1) {
-		addToDay(i, 5, 1, {
-			key: `break-pro-${i}`,
-			title: "Pro",
-			startTime: "12:00",
-			endTime: "12:40",
-			location: "-",
-			name: false,
-			isBreak: true
-		});
-	}
-
-	for (let i = 0; i < 5; i += 1) {
-		const thirdLesson = thirdLessonByDay[i];
-		let lunchStartSlot = 8;
-		let lunchStartTime = "14:00";
-		let lunchEndTime = "14:20";
-
-		if (thirdLesson) {
-			if (thirdLesson.isLiikumisopetus) {
-				lunchStartSlot = 6;
-				lunchStartTime = "12:40";
-				lunchEndTime = "13:00";
-			} else if (thirdLesson.x === 6 && thirdLesson.length <= 1) {
-				lunchStartSlot = 7;
-				lunchStartTime = "13:25";
-				lunchEndTime = "13:45";
+		case 3:
+			// ProTERA: "2. TUND" is always a fixed 10:30-11:50 slot (no
+			// double variant in the chart). Non-ProTERA schedule is left as
+			// it was — this chart doesn't cover that case.
+			if (useProTERATimeRules) {
+				return { startTime: "10:30", endTime: "11:50" };
 			}
-		}
+			return isDouble
+				? { startTime: "10:20", endTime: "11:50" }
+				: { startTime: "10:20", endTime: "10:30" };
 
-		addToDay(i, lunchStartSlot, 1, {
-			key: `break-louna-${i}`,
-			title: "Lõuna",
-			startTime: lunchStartTime,
-			endTime: lunchEndTime,
-			location: "-",
-			name: false,
-			isBreak: true
-		});
+		case 4:
+			return isDouble
+				? { startTime: "11:50", endTime: "13:35" }
+				: { startTime: "11:50", endTime: "12:50" };
+
+		case 5:
+			// The "third lesson" — a double period here means the afternoon
+			// break gets pushed later (see getProTERABreaksForDay).
+			if (isDouble) {
+				return useProTERATimeRules
+					? { startTime: "12:50", endTime: "14:10" }
+					: { startTime: "12:50", endTime: "13:55" };
+			}
+			return { startTime: "12:50", endTime: "13:35" };
+
+		case 6:
+			if (useProTERATimeRules) {
+				return hasLongThirdLesson
+					? (isDouble ? { startTime: "14:30", endTime: "15:50" } : { startTime: "14:30", endTime: "15:15" })
+					: (isDouble ? { startTime: "13:55", endTime: "15:15" } : { startTime: "13:55", endTime: "14:40" });
+			}
+			return isDouble
+				? { startTime: "13:55", endTime: "14:30" }
+				: { startTime: "13:55", endTime: "14:10" };
+
+		case 7:
+			if (useProTERATimeRules) {
+				return hasLongThirdLesson
+					? { startTime: "15:20", endTime: "16:05" }
+					: { startTime: "14:45", endTime: "15:30" };
+			}
+			return isDouble
+				? { startTime: "14:10", endTime: "15:15" }
+				: { startTime: "14:10", endTime: "14:30" };
+
+		case 8:
+			// ProTERA "5. TUND", short-path branch (after the short 4th
+			// lesson that ended 14:40). Always a single period in the
+			// chart, so length doesn't branch this one.
+			if (useProTERATimeRules) {
+				return { startTime: "14:45", endTime: "15:30" };
+			}
+			return isDouble
+				? { startTime: "14:30", endTime: "16:05" }
+				: { startTime: "14:30", endTime: "15:15" };
+
+		case 9:
+		default:
+			// ProTERA "5. TUND", long-path branch (after a 4th lesson that
+			// ended 15:15, whichever branch it came from).
+			if (useProTERATimeRules) {
+				return { startTime: "15:20", endTime: "16:05" };
+			}
+			return { startTime: "15:15", endTime: "16:05" };
 	}
+}
+
+function timeToMinutes(time: string): number {
+	const [hoursPart, minutesPart] = time.split(":");
+	const hours = parseInt(hoursPart, 10) || 0;
+	const minutes = parseInt(minutesPart, 10) || 0;
+	return hours * 60 + minutes;
+}
+
+function overlaps(aStart: string, aEnd: string, bStart: string, bEnd: string): boolean {
+	return timeToMinutes(aStart) < timeToMinutes(bEnd) && timeToMinutes(bStart) < timeToMinutes(aEnd);
+}
+
+/**
+ * Returns the ProTERA breaks that apply to a day, given that day's real
+ * lessons. A break is only included if it doesn't time-overlap a lesson
+ * that's actually scheduled that day — so a break can never clash with or
+ * displace a real class.
+ */
+export function getProTERABreaksForDay(
+	dayLessons: DayLessonTime[],
+	hasLongThirdLesson: boolean
+): ProTERABreakDefinition[] {
+	const candidates: ProTERABreakDefinition[] = [
+		{ title: "Pro", startTime: "11:50", endTime: "12:50" },
+		{ title: "Amps", startTime: "13:35", endTime: "13:55" }
+	];
+
+	if (hasLongThirdLesson) {
+		// A long (double) third lesson pushes the afternoon break later.
+		candidates.push({ title: "Amps", startTime: "14:10", endTime: "14:30" });
+	}
+
+	return candidates.filter(
+		(candidate) =>
+			!dayLessons.some((lesson) => overlaps(candidate.startTime, candidate.endTime, lesson.startTime, lesson.endTime))
+	);
 }

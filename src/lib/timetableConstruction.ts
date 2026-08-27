@@ -1,15 +1,18 @@
 import { getLessonsForGroup } from "./timetableHelper";
-import { addProTERABreaks, adjustLessonPlacementForProTERA, scanThirdLessonPatterns } from "./proteraRules";
+import { getLessonTimes, getProTERABreaksForDay } from "./proteraRules";
 import type { GroupSelectionState, TimetableItem } from "../types/timetable";
 
-interface DaySlotItem {
+export interface DayItem {
 	key: string;
 	title: string;
 	startTime: string;
 	endTime: string;
 	location?: string;
 	name?: string | false;
-	isBreak?: boolean;
+	isBreak: boolean;
+	// How many squares this item takes up in the day's row. Double lessons
+	// take 2; everything else (single lessons, breaks) takes 1.
+	width: number;
 }
 
 function pushItem(
@@ -40,6 +43,13 @@ function pushItem(
 	timetable.push(item);
 }
 
+function timeToMinutes(time: string): number {
+	const [hoursPart, minutesPart] = time.split(":");
+	const hours = parseInt(hoursPart, 10) || 0;
+	const minutes = parseInt(minutesPart, 10) || 0;
+	return hours * 60 + minutes;
+}
+
 export function buildTimetableFromLiveData(grData: GroupSelectionState | null): TimetableItem[] {
 	const timetable: TimetableItem[] = [];
 	if (!grData?.structuredData) {
@@ -48,36 +58,6 @@ export function buildTimetableFromLiveData(grData: GroupSelectionState | null): 
 
 	const { structuredData, groups } = grData;
 	const useProTERATimeRules = grData.useProTERATimeRules === true;
-	const daySlots: Array<Array<DaySlotItem | null>> = Array.from({ length: 5 }, () => new Array(10).fill(null));
-	const slotBoundaries = ["9:00", "9:35", "10:20", "10:40", "11:15", "12:00", "12:40", "13:25", "14:00", "14:20", "15:05"];
-	const periodToSlot = [0, 0, 2, 3, 5, 6, 7, 8, 9, 9, 9];
-	const thirdLessonByDay: Array<{ x: number; length: number; isLiikumisopetus?: boolean } | null> = new Array(5).fill(null);
-
-	function addToDay(dayIndex: number, startSlot: number, width: number, itemData: DaySlotItem): boolean {
-		const slots = daySlots[dayIndex];
-		if (!slots || startSlot < 0 || startSlot >= slots.length) {
-			return false;
-		}
-
-		const span = Math.max(1, parseInt(String(width), 10) || 1);
-		if (startSlot + span > slots.length) {
-			return false;
-		}
-
-		const conflict = slots
-			.slice(startSlot, startSlot + span)
-			.some((slot) => slot !== null && slot.key !== itemData.key);
-
-		if (conflict) {
-			return false;
-		}
-
-		for (let index = 0; index < span; index += 1) {
-			slots[startSlot + index] = itemData;
-		}
-
-		return true;
-	}
 
 	const allLessons = Object.entries(groups).flatMap(([selectionID, groupID]) => {
 		// Subject-based selections use `<division id>::<subject id>`.  The
@@ -93,11 +73,11 @@ export function buildTimetableFromLiveData(grData: GroupSelectionState | null): 
 			: lessons;
 	});
 
-	const { dayHasLongThird, dayHasShortThird } = scanThirdLessonPatterns(
-		allLessons,
-		periodToSlot,
-		useProTERATimeRules
-	);
+	// Each day's real lessons, collected first so we know (a) their actual
+	// times and (b) whether the day has a "long third lesson" before we
+	// decide which breaks apply.
+	const lessonsByDay: DayItem[][] = Array.from({ length: 5 }, () => []);
+	const hasLongThirdLessonByDay: boolean[] = new Array(5).fill(false);
 
 	for (const lessonData of allLessons) {
 		if (!lessonData?.lesson || !lessonData.time) {
@@ -105,95 +85,79 @@ export function buildTimetableFromLiveData(grData: GroupSelectionState | null): 
 		}
 
 		const dayIndex = lessonData.time.day - 1;
-		const title = lessonData.lesson.subject?.name ?? "Tund";
-		let length = Math.max(1, parseInt(String(lessonData.time.length), 10) || 1);
-		const rawSlot = lessonData.time.period === 2 && length === 1 ? 1 : periodToSlot[lessonData.time.period];
-		const isThirdLessonCandidate = rawSlot === 6;
-		let slot = rawSlot;
-
-		if (typeof slot !== "number") {
+		if (dayIndex < 0 || dayIndex >= lessonsByDay.length) {
 			continue;
 		}
 
-		const startIndex = slot;
-		const endIndex = Math.min(slot + length, slotBoundaries.length - 1);
-		let startTime = slotBoundaries[startIndex] ?? "-";
-		let endTime = slotBoundaries[endIndex] ?? "-";
-
-		const adjusted = adjustLessonPlacementForProTERA({
-			x: slot,
-			y: dayIndex,
-			length,
-			startTime,
-			endTime,
-			title,
-			dayHasLongThird,
-			dayHasShortThird,
-			useProTERATimeRules,
-			isThirdLessonCandidate
-		});
-
-		slot = adjusted.x;
-		length = adjusted.length;
-		startTime = adjusted.startTime;
-		endTime = adjusted.endTime;
-
+		const title = lessonData.lesson.subject?.name ?? "Tund";
+		const period = lessonData.time.period;
+		const length = Math.max(1, parseInt(String(lessonData.time.length), 10) || 1);
+		const { startTime, endTime } = getLessonTimes(period, length, useProTERATimeRules, hasLongThirdLessonByDay[dayIndex]);
 		const roomText = lessonData.room.join(", ");
 		const teacher = lessonData.lesson.teacher;
 		const teacherText = Array.isArray(teacher) ? teacher.join(", ") : teacher ?? undefined;
 
-		addToDay(dayIndex, slot, length, {
-			key: `lesson-${dayIndex}-${slot}-${title}-${teacherText ?? ""}-${roomText}`,
+		lessonsByDay[dayIndex].push({
+			key: `lesson-${dayIndex}-${period}-${title}-${teacherText ?? ""}-${roomText}`,
 			title,
 			startTime,
 			endTime,
 			location: roomText,
 			name: teacherText ?? false,
-			isBreak: false
+			isBreak: false,
+			// Same clamp as getLessonTimes: anything double-length-or-longer
+			// takes 2 squares, single periods take 1.
+			width: length >= 2 ? 2 : 1
 		});
 
-		if (useProTERATimeRules && isThirdLessonCandidate) {
-			thirdLessonByDay[dayIndex] = {
-				x: 6,
-				length,
-				isLiikumisopetus: adjusted.isLiikumisopetus
-			};
+		if (useProTERATimeRules && period === 5 && length >= 2) {
+			hasLongThirdLessonByDay[dayIndex] = true;
 		}
 	}
 
-	if (useProTERATimeRules) {
-		addProTERABreaks(addToDay, thirdLessonByDay);
-	}
+	for (let dayIndex = 0; dayIndex < lessonsByDay.length; dayIndex += 1) {
+		const dayLessons = lessonsByDay[dayIndex];
 
-	for (let dayIndex = 0; dayIndex < daySlots.length; dayIndex += 1) {
-		const slots = daySlots[dayIndex];
-		let slot = 0;
+		// Lessons and breaks for the day live in one list, ordered purely by
+		// when they actually happen. There's no shared grid to place them
+		// on, so there's nothing for two items to collide over — each just
+		// gets the next position once everything is sorted by start time.
+		const dayItems: DayItem[] = [...dayLessons];
 
-		while (slot < slots.length) {
-			const item = slots[slot];
-			if (!item) {
-				slot += 1;
-				continue;
-			}
+		if (useProTERATimeRules) {
+			const breaks = getProTERABreaksForDay(dayLessons, hasLongThirdLessonByDay[dayIndex]);
+			breaks.forEach((brk, breakIndex) => {
+				dayItems.push({
+					key: `break-${dayIndex}-${breakIndex}-${brk.title}`,
+					title: brk.title,
+					startTime: brk.startTime,
+					endTime: brk.endTime,
+					isBreak: true,
+					width: 1
+				});
+			});
+		}
 
-			let width = 1;
-			while (slot + width < slots.length && slots[slot + width]?.key === item.key) {
-				width += 1;
-			}
+		dayItems.sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
 
+		// x advances by each item's width rather than by a plain 1-per-item
+		// count, so a double lesson's neighbour starts two squares over
+		// instead of landing right on top of it.
+		let x = 0;
+		for (const item of dayItems) {
 			pushItem(
 				timetable,
-				slot,
+				x,
 				dayIndex,
 				item.title,
 				item.startTime,
 				item.endTime,
 				item.location,
 				item.name,
-				item.isBreak === true,
-				width
+				item.isBreak,
+				item.width
 			);
-			slot += width;
+			x += item.width;
 		}
 	}
 

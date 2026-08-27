@@ -96,7 +96,7 @@ export function getLessonTimes(period: number, length: number, useProTERATimeRul
 		case 7:
 			if (useProTERATimeRules) {
 				return hasLongThirdLesson
-					? { startTime: "15:20", endTime: "16:05" }
+					? { startTime: "14:30", endTime: "15:15" }
 					: { startTime: "14:45", endTime: "15:30" };
 			}
 			return isDouble

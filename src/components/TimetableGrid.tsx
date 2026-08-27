@@ -80,10 +80,10 @@ export function TimetableGrid({ items, highlighting }: { items: TimetableItem[];
 	return (
 		<div id="timetable" ref={timetableRef}>
 			<div className="num" style={{ gridColumn: "2 / span 2" }}>1</div>
-			<div className="num s" style={{ gridColumn: "4" }}>Amps</div>
-			<div className="num" style={{ gridColumn: "5 / span 2" }}>2</div>
-			<div className="num s" style={{ gridColumn: "7" }}>Proaeg</div>
-			<div className="num" style={{ gridColumn: "8 / span 2" }}>3</div>
+			<div className="num" style={{ gridColumn: "4 / span 2" }}>2</div>
+			<div className="num s" style={{ gridColumn: "6" }}>Proaeg</div>
+			<div className="num" style={{ gridColumn: "7 / span 2" }}>3</div>
+			<div className="num s" style={{ gridColumn: "9" }}>Amps</div>
 			<div className="num" style={{ gridColumn: "10 / span 2" }}>4</div>
 			{WEEKDAYS.map((weekday, index) => (
 				<div

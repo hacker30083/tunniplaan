@@ -18,6 +18,10 @@
 :root {
 	font-size: clamp(1rem, 1.8vw, 3rem);
 	font-family: Inter;
+	padding: 0;
+	margin: 0;
+	width: 100%;
+	height: 100%;
 }
 
 *, *::before, *::after {
@@ -41,6 +45,7 @@ body {
 	margin: 0;
 	padding: 0;
 	width: 100%;
+	height: 100%;
 	overflow-x: hidden;
 	font-size: 16px;
 	--qo: cubic-bezier(.25, 1, .5, 1); /* quadratic ease-out */
@@ -55,7 +60,7 @@ h1, h2, h3, p {
 	margin: 0;
 }
 hr {
-	width: 100%;
+	width: stretch;
 	margin: 1rem 0;
 	border: .04rem solid var(--gray);
 }
@@ -174,10 +179,10 @@ input {
    ============================================================ */
 .page {
 	display: flex;
-	flex: 1 1 auto;
 	width: 100%;
 	min-height: 0;
 	justify-content: center;
+	align-items: center;
 }
 
 .page#home {
@@ -187,28 +192,22 @@ input {
 .page-panel {
 	display: flex;
 	height: 100%;
-	width: 50%;
+	width: 100%;
 	padding: 3% 3%;
 	color: var(--fg);
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	min-width: 0;      /* let it actually shrink to fit */
   	overflow-x: auto
 }
 
 @media (min-width: 600px) {
-	.page {
-		height: 100vh;
-	}
+
 }
 
 @media (max-width: 600px) {
   .page {
     flex-direction: column;
-  }
-  .page-panel {
-    width: 100%;
   }
 }
 
@@ -219,6 +218,7 @@ input {
 .page-panel:is(:last-child) {
 	background-color: var(--bg-m);
 }
+
 #timetable-page {
 	display: flex;
 	height: 100%;
@@ -419,6 +419,7 @@ input {
 	grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 	gap: 0.4rem;
 	width: 100%;
+	height: 100%;
 	align-self: center;
 }
 .options-grid button {
@@ -781,16 +782,6 @@ button.small {
 	display: flex;
 	gap: 0.5rem;
 	margin-top: 1rem;
-}
-
-@media (max-width: 700px) {
-	.page {
-		flex-direction: column;
-	}
-	.page-panel {
-		width: 100%;
-		padding: 4% 5%;
-	}
 }
 
 

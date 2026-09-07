@@ -221,7 +221,6 @@ input {
 
 #timetable-page {
 	display: flex;
-	height: 100%;
 	flex-direction: column;
 }
 .action-feedback {
